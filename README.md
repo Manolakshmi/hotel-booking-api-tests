@@ -88,8 +88,10 @@ src/test
 
 * The test site is a public practice environment, so admin credentials are kept in
   `config.properties`.
-* Business limits are taken from the OpenAPI spec (`src/test/resources/spec/booking.yaml`):
-  first and last name 3 to 18 characters, phone 11 to 21 characters, a well-formed email address.
+* Business limits come from the OpenAPI spec (`src/test/resources/spec/booking.yaml`) and were
+  checked against the live API: first name 3 to 18 characters, phone 11 to 21 characters, a
+  well-formed email address. The live API allows 3 to 30 characters for the last name, although the
+  spec says 18 (BUG-09), so the tests use 30.
 * Observed behaviour wins over the spec when the two differ. A successful create returns
   **201** (the spec says 200), so the tests assert 201 and the difference is listed in the bug report.
 * Two bookings for the same room and overlapping dates are expected to conflict (409).

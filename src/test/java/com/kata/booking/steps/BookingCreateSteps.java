@@ -21,6 +21,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 @RequiredArgsConstructor
 public class BookingCreateSteps {
 
+    private static final int DEFAULT_NIGHTS = 2;
+    private static final int MAX_BOOKING_ATTEMPTS = 5;
+
     private final BookingClient bookingClient;
     private final ScenarioContext context;
 
@@ -31,21 +34,18 @@ public class BookingCreateSteps {
 
     @Given("a room has been booked")
     public void aRoomHasBeenBooked() {
-        submit(context.getBookingBuilder().build());
+        submitOnFreeDates(context.getBookingBuilder(), DEFAULT_NIGHTS);
         context.createdBooking();
     }
 
     @When("the guest books a room")
     public void theGuestBooksARoom() {
-        submit(context.getBookingBuilder().build());
+        submitOnFreeDates(context.getBookingBuilder(), DEFAULT_NIGHTS);
     }
 
     @When("the guest books room {int} for {int} nights")
     public void theGuestBooksRoomForNights(int roomId, int nights) {
-        submit(context.getBookingBuilder()
-                .withRoomId(roomId)
-                .withBookingDates(StayDates.randomStay(nights))
-                .build());
+        submitOnFreeDates(context.getBookingBuilder().withRoomId(roomId), nights);
     }
 
     @When("another guest books the same room for the same dates")
@@ -55,7 +55,7 @@ public class BookingCreateSteps {
 
     @When("the guest books with {word} set to {string}")
     public void theGuestBooksWithFieldSetTo(String field, String value) {
-        submit(context.getBookingBuilder().withField(field, value).build());
+        submitOnFreeDates(context.getBookingBuilder().withField(field, value), DEFAULT_NIGHTS);
     }
 
     @When("the guest books a room with check-out before check-in")
@@ -80,12 +80,10 @@ public class BookingCreateSteps {
 
     @When("the following guests book a room")
     public void theFollowingGuestsBookARoom(DataTable guests) {
-        guests.asMaps().forEach(guest -> submit(context.getBookingBuilder()
+        guests.asMaps().forEach(guest -> submitOnFreeDates(context.getBookingBuilder()
                 .withFirstName(guest.get("firstname"))
                 .withLastName(guest.get("lastname"))
-                .withDepositPaid(Boolean.parseBoolean(guest.get("depositpaid")))
-                .withBookingDates(StayDates.randomStay(2))
-                .build()));
+                .withDepositPaid(Boolean.parseBoolean(guest.get("depositpaid"))), DEFAULT_NIGHTS));
     }
 
     @Then("the booking is confirmed")
@@ -126,5 +124,26 @@ public class BookingCreateSteps {
 
     private void submit(BookingRequest request) {
         context.record(request, bookingClient.create(request));
+    }
+
+    /**
+     * Books on a random stay window and tries a new window when the room is taken (409).
+     * The site is shared with other users, so a random window can occasionally clash.
+     */
+    private void submitOnFreeDates(BookingRequestBuilder builder, int nights) {
+        BookingRequest request = null;
+        BookingOutcome outcome = null;
+        for (int attempt = 1; attempt <= MAX_BOOKING_ATTEMPTS; attempt++) {
+            request = builder.withBookingDates(StayDates.randomStay(nights)).build();
+            outcome = bookingClient.create(request);
+            if (!isConflict(outcome)) {
+                break;
+            }
+        }
+        context.record(request, outcome);
+    }
+
+    private static boolean isConflict(BookingOutcome outcome) {
+        return outcome instanceof BookingOutcome.Rejected rejected && rejected.response().statusCode() == 409;
     }
 }
