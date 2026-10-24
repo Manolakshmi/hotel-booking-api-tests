@@ -1,67 +1,108 @@
-# Kata API Testing in Java
+# Hotel Booking API Tests
 
-API Testing and Java Exercise: Setting up a Basic API Test Automation Framework.
+API test automation framework for the booking endpoint of <https://automationintesting.online/>,
+built with **Java 17, Rest-Assured and Cucumber (JUnit 5)**.
 
-## Objective
-The objective of this exercise is to evaluate your knowledge on API testing and Java by setting up a basic API Test Automation framework using Rest-Assured and Cucumber. You will need to create a test suite that executes a few tests against one endpoint of a hotel booking website and evaluates their responses.
+The scenarios are written in Gherkin so they can be read without knowing Java. All HTTP details
+live in small client classes, and the step definitions only describe business behaviour.
 
-## Background
-The application under test is a simple hotel booking website where you can book a room and also send a form with a request.
+## Prerequisites
 
-The website can be accessed at https://automationintesting.online/.
+| Tool  | Version |
+|-------|---------|
+| JDK   | 17 or higher |
+| Maven | 3.9 or higher |
+| Git   | any recent version |
 
-The Swagger documentation for the two endpoints you will be testing can be found at:
+Lombok is used for constructor injection. Maven applies it automatically; if you open the project
+in IntelliJ, enable *Settings > Build, Execution, Deployment > Compiler > Annotation Processors >
+Enable annotation processing*.
 
-Booking endpoint: https://automationintesting.online/booking/swagger-ui/index.html  
-Optionally, you also have the Authentican endpoint: https://automationintesting.online/auth/swagger-ui/index.html
+## Build and run
 
-### Swagger
-This website is an external application which is not in our control.  
-We noticed that the Swagger documentation is sometimes not available on the mentioned URL above.  
-As a backup, you can find the Swagger documentation in this repository at [src/test/resources/spec/booking.yaml](src/test/resources/spec/booking.yaml)
+```bash
+mvn clean test                      # default run (see "Tags" below)
+mvn clean test -Dcucumber.filter.tags="@smoke"
+mvn clean test -Dcucumber.filter.tags="@known-bug"   # scenarios that currently fail on the live site
+mvn clean test -Dapi.logging=false  # quieter console output
+```
 
-The Open API Spec file is only supported in the Ultimate version of IntelliJ IDEA. But you can copy the content of the file and paste it in an online Swagger editor like https://editor.swagger.io/ to visualize the API documentation.
+Reports are written to `target/cucumber-reports/`:
 
-### Authentication
-In order to authenticate yourself, the required credentials are:
-* Username: `admin`
-* Password: `password`
+* `cucumber.html` is the human-readable execution report
+* `cucumber.json` is the machine-readable result
 
-## Task
-You are provided with an extremely basic API test project.
+## Tags
 
-Please clone the project and create a new branch with your name. At the end, please push your branch to this project.
+| Tag | Meaning |
+|-----|---------|
+| `@smoke` | Quick checks that the main flows work |
+| `@positive` / `@negative` | Expected-success and expected-rejection scenarios |
+| `@contract` | Response structure (JSON schema) and response time |
+| `@security` | Behaviour without a valid session |
+| `@e2e` | Multi-step flows |
+| `@known-bug` | Fails today because of a confirmed defect in the API, see `BUG_REPORT.md` |
+| `@wip` | Written from the OpenAPI spec but not verified against the live site yet |
 
-The project to start from, can be found here: https://github.com/freddyschoeters/API_Testing_kata
+The default run excludes `@known-bug` and `@wip` (`cucumber.filter.tags` in
+`src/test/resources/junit-platform.properties`), so the build stays green while the known
+problems stay visible and runnable.
 
-Your task is to set up an API Test Automation framework from this project using Java, Rest-Assured, and Cucumber (feel free to add more dependencies if required).
+## Project structure
 
-It is up to you to define the test cases. You don’t need to have a full coverage, but you need to show enough variation on the types of tests that you would need to write and execute, and what to check in the response.
+```
+src/test
+├── java/com/kata/booking
+│   ├── runner/    RunCucumberTest         JUnit 5 suite that starts Cucumber
+│   ├── config/    ApiConfig               base URL and credentials, with -D overrides
+│   ├── model/     records for requests and responses, sealed BookingOutcome
+│   ├── client/    AuthClient, BookingClient, RequestSpecFactory   (all HTTP calls)
+│   ├── builder/   BookingRequestBuilder, StayDates, RawPayloads   (test data)
+│   ├── context/   ScenarioContext         state shared between steps of one scenario
+│   └── steps/     step definitions and Hooks (cleanup)
+└── resources
+    ├── features/  Gherkin feature files
+    ├── schemas/   JSON schema for the create-booking response
+    ├── config.properties
+    └── junit-platform.properties
+```
 
-This kata has the purpose to evaluate both your technical skills as well as your testing skills.
+## Design choices
 
-`For this task, you will use the booking endpoint.`
+* **Service Object pattern.** `BookingClient` and `AuthClient` wrap the endpoints. A change to a
+  path or header is made in one place.
+* **Builder pattern.** `BookingRequestBuilder` starts from a valid booking, so each test states only
+  the detail it checks.
+* **Dependency injection.** PicoContainer injects `ScenarioContext` and the clients through
+  constructors (Lombok `@RequiredArgsConstructor`). Every scenario gets its own context, so there
+  is no shared static state.
+* **Modern Java.** Records for models, a sealed interface (`BookingOutcome`) with pattern matching
+  (`instanceof Created created`), switch expressions in the builder, and text blocks for raw
+  JSON payloads.
+* **Gherkin features used.** Background, Scenario Outline with several Examples blocks, Data
+  Tables, Tags and comments.
+* **Repeatable data.** Stay dates are generated from today's date with a random offset, because the
+  site is shared and keeps bookings. An `@After` hook deletes the bookings a scenario created.
 
+## Assumptions
 
-## Requirements
-* Use Java as the programming language
-* Use Rest-Assured as the API testing library
-* Use Cucumber as the BDD framework
-* Design your codebase using a proper Java design pattern
-* Write good tests with correct checks
-* Use Git for version control and push your codebase to an open GitHub repository
-* Make regular commits to demonstrate your progress
+* The test site is a public practice environment, so admin credentials are kept in
+  `config.properties`.
+* Business limits come from the OpenAPI spec (`src/test/resources/spec/booking.yaml`) and were
+  checked against the live API: first name 3 to 18 characters, phone 11 to 21 characters, a
+  well-formed email address. The live API allows 3 to 30 characters for the last name, although the
+  spec says 18 (BUG-09), so the tests use 30.
+* Observed behaviour wins over the spec when the two differ. A successful create returns
+  **201** (the spec says 200), so the tests assert 201 and the difference is listed in the bug report.
+* Two bookings for the same room and overlapping dates are expected to conflict (409).
+* Cancellation is expected to return 201, as documented in the spec; this is unverified (`@wip`).
 
+## Known issues
 
-## Deliverables
-* Your branch pushed in the provided project.
-* A comprehensive test suite covering the scenarios mentioned above
-* A well-structured codebase with proper design patterns and comments
-* Regular commits demonstrating your progress
+See [BUG_REPORT.md](BUG_REPORT.md) for the defects found while exploring the API, with the exact
+requests and responses.
 
-## Evaluation Criteria
-* Being able to successfully run the tests
-* Correctness and completeness of the test suite
-* Quality of the codebase (design patterns, structure, code quality, …)
-* Use of Rest-Assured and Cucumber features
-* Commit history and progress demonstration
+## CI
+
+`.github/workflows/ci.yml` runs `mvn clean test` on every push and uploads the Cucumber report as a
+build artifact.
